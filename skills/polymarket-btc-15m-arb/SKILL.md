@@ -3,8 +3,8 @@
 Paper-first 15-minute BTC up/down arbitrage-style signaler/executor using Simmer SDK + Binance spot feed.
 
 ## What it does
-- Ingests BTCUSDT price stream (Binance WS) + Simmer market prices/orderbook (via SDK endpoints).
-- Computes simple fair-value + edge + confidence.
+- Ingests BTCUSDT price snapshot (Binance REST klines for 15m) + Simmer market prices (via SDK context).
+- Computes simple fair-value (drift proxy) + edge + confidence.
 - Paper mode by default: logs trade intents + simulated fills.
 - Journals every decision (TRADE/SKIP) to JSONL + CSV.
 

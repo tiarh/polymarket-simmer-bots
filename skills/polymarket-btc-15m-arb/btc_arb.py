@@ -100,6 +100,102 @@ def fetch_context(api_key: str, market_id: str) -> Dict[str, Any]:
     return api_request(api_key, f"/api/sdk/context/{market_id}")
 
 
+def discover_gamma_markets(slug_prefix: str, limit: int = 50) -> List[Dict[str, Any]]:
+    url = (
+        "https://gamma-api.polymarket.com/markets"
+        "?limit=50&closed=false&tag=crypto&order=createdAt&ascending=false"
+    )
+    data = _http_json(url, timeout=15)
+    if not isinstance(data, list):
+        return []
+    out = []
+    for m in data:
+        slug = (m.get("slug") or "")
+        if not slug.startswith(slug_prefix):
+            continue
+        out.append(m)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def discover_simmer_btc15m_market_ids(api_key: str, limit: int = 12) -> List[str]:
+    """Discover Simmer market_ids for BTC fast-15m markets.
+
+    This uses Simmer's own index (import_source=polymarket, tags include fast-15m),
+    which is what we actually need to trade via SDK.
+    """
+    res = api_request(api_key, "/api/sdk/markets?tags=fast-15m&limit=200")
+    mkts = res.get("markets", []) if isinstance(res, dict) else []
+
+    rows = []
+    for m in mkts:
+        q = (m.get("question") or "")
+        if "Bitcoin Up or Down" not in q:
+            continue
+        ra = m.get("resolves_at")
+        rows.append((ra, m.get("id"), q))
+
+    # Sort by resolves_at string (ISO) which is sortable lexicographically
+    rows.sort(key=lambda x: x[0] or "")
+
+    out: List[str] = []
+    for _ra, mid, _q in rows:
+        if mid:
+            out.append(mid)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def discover_simmer_market_ids_from_gamma(api_key: str, slug_prefix: str, limit: int = 12) -> List[str]:
+    """(Optional) Use Gamma as a hint, but fall back to Simmer discovery.
+
+    Gamma can be ahead of Simmer imports for the newest epochs.
+    So this function tries to map Gamma questions to Simmer ids; if mapping is empty,
+    we fall back to Simmer's own fast-15m list.
+    """
+    try:
+        gamma = discover_gamma_markets(slug_prefix=slug_prefix, limit=limit)
+    except Exception:
+        gamma = []
+
+    # Lookup question->id from Simmer
+    try:
+        res = api_request(api_key, "/api/sdk/markets?tags=fast-15m&limit=200")
+        simmer_markets = res.get("markets", []) if isinstance(res, dict) else []
+    except Exception:
+        simmer_markets = []
+
+    def norm(s: str) -> str:
+        s = (s or "").strip().lower()
+        s = s.replace("\u2013", "-").replace("\u2014", "-")
+        s = " ".join(s.split())
+        return s
+
+    by_q: Dict[str, str] = {norm(m.get("question")): m.get("id") for m in simmer_markets if m.get("question") and m.get("id")}
+
+    ids: List[str] = []
+    for gm in gamma:
+        mid = by_q.get(norm(gm.get("question") or ""))
+        if mid:
+            ids.append(mid)
+
+    # if Gamma mapping fails (often for the newest markets), fall back
+    if not ids:
+        return discover_simmer_btc15m_market_ids(api_key, limit=limit)
+
+    # De-dup preserve order
+    seen = set()
+    out = []
+    for mid in ids:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        out.append(mid)
+    return out[:limit]
+
+
 def fetch_quote(api_key: str, market_id: str) -> MarketQuote:
     ctx = fetch_context(api_key, market_id)
     question = ctx.get("question") or market_id
@@ -127,13 +223,48 @@ def fetch_quote(api_key: str, market_id: str) -> MarketQuote:
     return MarketQuote(market_id=market_id, question=question, best_yes=best_yes, best_no=best_no, spread=spread)
 
 
-def fair_prob_from_move_proxy() -> Tuple[float, float]:
-    """Placeholder fair-prob model.
+def _http_json(url: str, timeout: int = 15, headers: Optional[Dict[str, str]] = None) -> Any:
+    req_headers = headers or {}
+    if "User-Agent" not in req_headers:
+        req_headers["User-Agent"] = "btc15m-arb/0.1"
+    req = Request(url, headers=req_headers)
+    with urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
-    For MVP paper: assume 50/50 and low confidence.
-    Next iteration: derive from BTCUSDT 15m realized vol + drift.
+
+def fair_prob_from_move_proxy() -> Tuple[float, float]:
+    """Estimate fair probability of UP over next 15m from Binance.
+
+    This is intentionally simple and paper-safe:
+    - Pull last 2 x 15m klines for BTCUSDT.
+    - Use last-candle return as a drift proxy.
+    - Map drift to probability via logistic with tunable scale.
+
+    Returns: (fair_up_prob, confidence)
     """
-    return 0.50, 0.55
+    sym = os.environ.get("SIMMER_BTC_ARB_SYMBOL", "BTCUSDT")
+    interval = os.environ.get("SIMMER_BTC_ARB_KLINE_INTERVAL", "15m")
+    scale = float(os.environ.get("SIMMER_BTC_ARB_DRIFT_SCALE", "250"))  # bigger => smaller moves
+
+    url = f"https://api.binance.com/api/v3/klines?symbol={sym}&interval={interval}&limit=2"
+    try:
+        kl = _http_json(url, timeout=10)
+        if not isinstance(kl, list) or len(kl) < 2:
+            return 0.50, 0.50
+        # kline format: [openTime, open, high, low, close, volume, ...]
+        o = float(kl[-1][1])
+        c = float(kl[-1][4])
+        r = (c - o) / o if o > 0 else 0.0
+
+        # logistic mapping
+        x = clamp(r * scale, -6.0, 6.0)
+        fair = 1.0 / (1.0 + math.exp(-x))
+
+        # confidence increases with |r| but capped
+        conf = clamp(0.55 + min(abs(r) * scale / 10.0, 0.35), 0.50, 0.90)
+        return float(fair), float(conf)
+    except Exception:
+        return 0.50, 0.50
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -177,8 +308,16 @@ def main() -> int:
     max_bump = float(os.environ.get("SIMMER_BTC_ARB_MAX_BUMP_USD", "5"))
 
     market_ids = args.market_id
+
+    # Discovery via Gamma → Simmer mapping (paper-first)
+    discovery = os.environ.get("SIMMER_BTC_ARB_DISCOVERY", "1") == "1"
+    max_markets = int(os.environ.get("SIMMER_BTC_ARB_MAX_MARKETS", "12"))
+    slug_prefix = os.environ.get("SIMMER_BTC_ARB_MARKET_SLUG_PREFIX", "btc-updown-15m-")
+
+    if not market_ids and discovery:
+        market_ids = discover_simmer_market_ids_from_gamma(api_key, slug_prefix=slug_prefix, limit=max_markets)
+
     if not market_ids:
-        # MVP: reuse FastLoop discovery in future; for now require explicit.
         skip = {
             "ts": utc_now_iso(),
             "source": "btc15m-arb",
@@ -188,7 +327,7 @@ def main() -> int:
         }
         append_journal(skip)
         if not args.quiet:
-            print("SKIP: no market_ids configured; pass --market-id ...")
+            print("SKIP: no market_ids configured; enable discovery or pass --market-id ...")
         return 0
 
     # Risk gates from portfolio
