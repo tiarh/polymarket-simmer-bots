@@ -104,9 +104,18 @@ def fetch_quote(api_key: str, market_id: str) -> MarketQuote:
     ctx = fetch_context(api_key, market_id)
     question = ctx.get("question") or market_id
 
-    # Simmer context often contains prices; fall back gracefully.
-    yes = ctx.get("best_yes") or ctx.get("yes_best_ask") or ctx.get("yes_price")
-    no = ctx.get("best_no") or ctx.get("no_best_ask") or ctx.get("no_price")
+    # Simmer returns nested market data; for binary markets, current_probability is a good proxy for YES price.
+    mk = ctx.get("market") if isinstance(ctx, dict) else None
+    if isinstance(mk, dict):
+        yes = mk.get("current_probability")
+        # Some endpoints also expose current_price; treat it as probability for binary markets.
+        if yes is None:
+            yes = mk.get("current_price")
+        no = (1.0 - float(yes)) if yes is not None else None
+    else:
+        # Fallbacks (older schemas)
+        yes = ctx.get("best_yes") or ctx.get("yes_best_ask") or ctx.get("yes_price") or ctx.get("current_probability")
+        no = ctx.get("best_no") or ctx.get("no_best_ask") or ctx.get("no_price")
 
     best_yes = float(yes) if yes is not None else None
     best_no = float(no) if no is not None else None
