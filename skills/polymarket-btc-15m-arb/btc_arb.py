@@ -31,6 +31,7 @@ SIMMER_API_BASE = "https://api.simmer.markets"
 
 JOURNAL_JSONL = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "memory", "btc_15m_arb_journal.jsonl")
 JOURNAL_CSV = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "memory", "btc_15m_arb_journal.csv")
+STATE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "memory", "btc_15m_arb_state.json")
 
 
 def utc_now_iso() -> str:
@@ -55,6 +56,20 @@ def api_request(api_key: str, endpoint: str) -> Any:
 
 def ensure_parent(path: str) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+
+def load_state() -> Dict[str, Any]:
+    try:
+        with open(STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"last_intent_ts": {}}
+
+
+def save_state(st: Dict[str, Any]) -> None:
+    ensure_parent(STATE_PATH)
+    with open(STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(st, f, indent=2)
 
 
 def append_journal(row: Dict[str, Any]) -> None:
@@ -477,6 +492,26 @@ def main() -> int:
             desired_usd = usd_for_min
             shares = min_shares
 
+        # Intent cooldown per market to avoid spamming paper entries
+        intent_cd = int(os.environ.get("SIMMER_BTC_ARB_INTENT_COOLDOWN_SECS", "900"))
+        st = load_state()
+        li = st.get("last_intent_ts", {})
+        now_ts = time.time()
+        last_ts = float(li.get(mid) or 0)
+        if intent_cd > 0 and (now_ts - last_ts) < intent_cd:
+            row = {
+                "ts": utc_now_iso(),
+                "source": "btc15m-arb",
+                "action": "SKIP",
+                "reason": "intent_cooldown",
+                "market_id": mid,
+                "question": q.question,
+                "secs_remaining": int(intent_cd - (now_ts - last_ts)),
+                "live": live,
+            }
+            append_journal(row)
+            continue
+
         row = {
             "ts": utc_now_iso(),
             "source": "btc15m-arb",
@@ -495,6 +530,11 @@ def main() -> int:
             "live": live,
         }
         append_journal(row)
+        # update state
+        st = load_state()
+        st.setdefault("last_intent_ts", {})[mid] = now_ts
+        save_state(st)
+
         if not args.quiet:
             print(json.dumps(row, ensure_ascii=False))
 
