@@ -206,6 +206,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--limit", type=int, default=200)
+    ap.add_argument("--exit-only", action="store_true", help="Only manage exits; never open new entries")
     args = ap.parse_args()
 
     dry_run = not args.live
@@ -311,7 +312,12 @@ def main():
             if exits >= MAX_TRADES:
                 break
 
-    # 2) Entry scanning
+    # 2) Entry scanning (skipped in exit-only mode)
+    if args.exit_only:
+        print("\nExit-only mode enabled: skipping entry scan.")
+        print("\nDone. Trades: 0")
+        return
+
     try:
         res = client._request("GET", "/api/sdk/markets", params={"tags":"weather","status":"active","limit":args.limit})
         markets = res.get("markets", [])
