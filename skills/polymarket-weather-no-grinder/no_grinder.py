@@ -48,6 +48,10 @@ TP2_YES_LTE = float(os.environ.get("SIMMER_NO_TP2_YES_LTE", "0.81"))
 # Safety time-exit when resolving soon AND position is losing
 SAFETY_EXIT_HOURS = float(os.environ.get("SIMMER_NO_SAFETY_EXIT_HOURS", "1"))
 
+# Optional force-exit: if YES stays extremely high (NO extremely expensive / bad convexity), cut.
+# Disabled by default (set 0 to disable).
+FORCE_EXIT_YES_GTE = float(os.environ.get("SIMMER_NO_FORCE_EXIT_YES_GTE", "0"))
+
 JOURNAL_JSONL = Path(os.environ.get(
     "SIMMER_NO_JOURNAL_JSONL",
     "/root/.openclaw/workspace/memory/no_grinder_journal.jsonl",
@@ -249,8 +253,12 @@ def main():
         sell_target = 0.0
         reason = None
 
+        # Force-exit if YES is extremely high (user-defined). This is independent of PnL.
+        if FORCE_EXIT_YES_GTE and yes_price >= float(FORCE_EXIT_YES_GTE):
+            sell_target = shares_no
+            reason = f"force_exit (YES>= {FORCE_EXIT_YES_GTE})"
         # Safety time-exit (only if losing)
-        if SAFETY_EXIT_HOURS and hours_to_resolve is not None and hours_to_resolve <= float(SAFETY_EXIT_HOURS) and is_losing:
+        elif SAFETY_EXIT_HOURS and hours_to_resolve is not None and hours_to_resolve <= float(SAFETY_EXIT_HOURS) and is_losing:
             sell_target = shares_no
             reason = f"safety_exit (<= {SAFETY_EXIT_HOURS}h & losing)"
         else:
