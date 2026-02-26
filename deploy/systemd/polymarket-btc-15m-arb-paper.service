@@ -1,0 +1,16 @@
+[Unit]
+Description=Polymarket BTC 15m arb (PAPER)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/.openclaw/workspace
+EnvironmentFile=/root/.openclaw/workspace/secrets/simmer.env
+Environment=SIMMER_BTC_ARB_LIVE=0
+Environment=SIMMER_BTC_ARB_MAX_POSITION_USD=200
+Environment=SIMMER_BTC_ARB_MAX_CONCURRENT=2
+Environment=SIMMER_BTC_ARB_DAILY_LOSS_LIMIT_USD=50
+Environment=SIMMER_BTC_ARB_EDGE_MIN=0.02
+Environment=SIMMER_BTC_ARB_CONF_MIN=0.60
+Environment=SIMMER_MIN_SHARES=5
+Environment=SIMMER_BTC_ARB_MAX_BUMP_USD=5
+ExecStart=/root/weather-env/bin/python /root/.openclaw/workspace/skills/polymarket-btc-15m-arb/btc_arb.py -q
