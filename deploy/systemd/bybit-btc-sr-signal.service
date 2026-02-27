@@ -1,0 +1,20 @@
+[Unit]
+Description=Bybit BTCUSDT Perp S/R signal (trial, no trade)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/.openclaw/workspace
+Environment=BYBIT_SYMBOL=BTCUSDT
+Environment=BYBIT_CATEGORY=linear
+Environment=BYBIT_INTERVAL=5
+Environment=BYBIT_LOOKBACK=300
+Environment=BYBIT_PIVOT_LEFT=3
+Environment=BYBIT_PIVOT_RIGHT=3
+Environment=BYBIT_SR_MAX_LEVELS=8
+Environment=BYBIT_FIXED_SIZE_BTC=0.003
+Environment=BYBIT_MAX_RISK_USD=3.0
+Environment=BYBIT_RR=2
+Environment=BYBIT_SIGNAL_COOLDOWN_SECS=1800
+Environment=BYBIT_TELEGRAM_TARGET=1089213658
+Environment=TV_SYMBOL=BYBIT:BTCUSDT.P
+ExecStart=/root/weather-env/bin/python /root/.openclaw/workspace/scripts/bybit_btcusdtperp_sr_signal.py

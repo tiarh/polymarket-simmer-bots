@@ -126,16 +126,19 @@ def fmt(x: float) -> str:
     return f"{x:,.2f}"
 
 
-def telegram_send(text: str) -> None:
+def telegram_send(text: str, media_path: Optional[str] = None) -> None:
     target = os.environ.get("BYBIT_TELEGRAM_TARGET")
     if not target:
         return
-    subprocess.run([
+    cmd = [
         "openclaw", "message", "send",
         "--channel", "telegram",
         "--target", str(target),
         "--message", text,
-    ], check=False)
+    ]
+    if media_path:
+        cmd += ["--media", media_path]
+    subprocess.run(cmd, check=False)
 
 
 def main() -> int:
@@ -261,6 +264,19 @@ def main() -> int:
         row["tv_symbol"] = tv_symbol
         row["tv_link"] = tv_link
 
+        # TradingView snapshot
+        snap = os.path.join(WORKSPACE, "memory", "bybit_tv_last.png")
+        try:
+            subprocess.run([
+                "/root/weather-env/bin/python",
+                os.path.join(WORKSPACE, "scripts", "tv_snapshot.py"),
+                "--url", tv_link,
+                "--out", snap,
+            ], timeout=60, check=False)
+            media = snap if os.path.exists(snap) else None
+        except Exception:
+            media = None
+
         msg = (
             f"BYBIT SIGNAL (trial, no trade)\n"
             f"{sym} {interval}m | Trend: {trend}\n"
@@ -269,10 +285,11 @@ def main() -> int:
             f"SL: {fmt(sl)} (risk≈${r_usd:.2f})\n"
             f"TP: {fmt(tp)} (R:R 1:{int(rr)})\n"
             f"Size: {size_btc:.4f} BTC\n"
+            f"S/R: support={fmt(sup)} | resistance={fmt(res)}\n"
             f"TV: {tv_link}\n"
             f"Reason: {reason}"
         )
-        telegram_send(msg)
+        telegram_send(msg, media_path=media)
         return 0
 
     row.update({"type": "skip", "reason": "no_setup_or_risk_too_high", "max_risk_usd": max_risk, "size_btc": size_btc})

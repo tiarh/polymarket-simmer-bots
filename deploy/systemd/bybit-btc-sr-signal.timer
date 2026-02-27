@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Bybit BTC S/R signal every 5 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=300s
+AccuracySec=15s
+Unit=bybit-btc-sr-signal.service
+
+[Install]
+WantedBy=timers.target
