@@ -81,24 +81,36 @@ def append_result(row: Dict[str, Any]) -> None:
         w.writerow(row)
 
 
-def paper_pnl(side: str, price: float, shares: float, outcome_up: bool, fee_rate_bps: float = 0.0) -> Dict[str, float]:
-    """Binary contract priced in [0,1], pays 1 if YES outcome true.
+def paper_pnl(side: str, price: float, shares: float, outcome_up: bool, fee_rate_bps: float = 0.0, slippage_bps: float = 0.0) -> Dict[str, float]:
+    """Paper PnL for a 2-outcome contract.
 
-    For NO, we treat it as YES on DOWN with price = 1-yes.
-
-    fee approximation: fee_rate_bps applied to notional (shares * price).
+    - price is entry price for the chosen side in [0,1].
+    - slippage_bps pushes entry price *against* us.
+    - fee model: apply fee_rate_bps to *gross profit* on wins (conservative-ish and avoids absurd fee totals).
+      (If fee_rate_bps missing, fee=0.)
     """
-    notional = shares * price
-    fee = notional * (fee_rate_bps / 10000.0)
+    # apply adverse slippage
+    slip = max(0.0, slippage_bps) / 10000.0
+    px = min(0.999, max(0.001, price + slip))
+
+    notional = shares * px
 
     win = outcome_up if side == "YES" else (not outcome_up)
     if win:
-        gross = shares * (1.0 - price)
+        gross = shares * (1.0 - px)
+        fee_base = max(0.0, gross)
     else:
-        gross = -shares * price
+        gross = -shares * px
+        fee_base = 0.0
+
+    fee_rate = max(0.0, fee_rate_bps) / 10000.0
+    # cap fee rate to avoid garbage data
+    fee_rate = min(fee_rate, 0.02)
+    fee = fee_base * fee_rate
 
     net = gross - fee
     return {
+        "entry_price_slipped": float(px),
         "notional": float(notional),
         "fee": float(fee),
         "pnl_gross": float(gross),
@@ -228,7 +240,8 @@ def main() -> int:
                 new_resolved += 1
                 continue
 
-            calc = paper_pnl(side=side, price=price, shares=shares, outcome_up=outcome_up, fee_rate_bps=fee_rate_bps)
+            slippage_bps = float(os.environ.get("SIMMER_BTC_ARB_SLIPPAGE_BPS", "15"))
+            calc = paper_pnl(side=side, price=price, shares=shares, outcome_up=outcome_up, fee_rate_bps=fee_rate_bps, slippage_bps=slippage_bps)
 
             out = {
                 "resolved_ts": utc_now_iso(),
