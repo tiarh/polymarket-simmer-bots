@@ -346,37 +346,39 @@ def main() -> int:
         return 0
 
     # Risk gates from portfolio
+    # NOTE: for PAPER mode, do NOT block on account-wide open positions; otherwise paper never runs when other bots have positions.
     portfolio = get_positions_summary(api_key)
     pnl_24h = portfolio.get("pnl_24h")
     positions_count = int(portfolio.get("positions_count", 0) or 0)
 
-    if pnl_24h is not None and float(pnl_24h) <= -abs(daily_loss):
-        row = {
-            "ts": utc_now_iso(),
-            "source": "btc15m-arb",
-            "action": "SKIP",
-            "reason": "daily_loss_limit",
-            "pnl_24h": pnl_24h,
-            "live": live,
-        }
-        append_journal(row)
-        if not args.quiet:
-            print("SKIP: daily loss limit")
-        return 0
+    if live:
+        if pnl_24h is not None and float(pnl_24h) <= -abs(daily_loss):
+            row = {
+                "ts": utc_now_iso(),
+                "source": "btc15m-arb",
+                "action": "SKIP",
+                "reason": "daily_loss_limit",
+                "pnl_24h": pnl_24h,
+                "live": live,
+            }
+            append_journal(row)
+            if not args.quiet:
+                print("SKIP: daily loss limit")
+            return 0
 
-    if positions_count >= max_conc:
-        row = {
-            "ts": utc_now_iso(),
-            "source": "btc15m-arb",
-            "action": "SKIP",
-            "reason": "max_concurrent",
-            "positions_count": positions_count,
-            "live": live,
-        }
-        append_journal(row)
-        if not args.quiet:
-            print("SKIP: max concurrent")
-        return 0
+        if positions_count >= max_conc:
+            row = {
+                "ts": utc_now_iso(),
+                "source": "btc15m-arb",
+                "action": "SKIP",
+                "reason": "max_concurrent",
+                "positions_count": positions_count,
+                "live": live,
+            }
+            append_journal(row)
+            if not args.quiet:
+                print("SKIP: max concurrent")
+            return 0
 
     fair_prob, confidence = fair_prob_from_move_proxy()
 

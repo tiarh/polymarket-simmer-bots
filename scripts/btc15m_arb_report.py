@@ -23,7 +23,8 @@ def main() -> int:
         return 0
 
     now = datetime.now(timezone.utc)
-    since = now - timedelta(hours=24)
+    hours = float(os.environ.get("SIMMER_BTC_ARB_REPORT_HOURS", "24"))
+    since = now - timedelta(hours=hours)
 
     n = 0
     wins = 0
@@ -54,7 +55,7 @@ def main() -> int:
 
     winrate = wins / n if n else 0
     out = []
-    out.append("BTC 15m ARB PAPER (last 24h)")
+    out.append(f"BTC 15m ARB PAPER (last {hours:g}h)")
     out.append(f"Trades resolved: {n}")
     out.append(f"Win-rate: {winrate:.1%} ({wins}/{n})")
     out.append(f"Net PnL: ${pnl:,.2f}")
