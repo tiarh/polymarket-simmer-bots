@@ -256,6 +256,11 @@ def main() -> int:
         st["last_signal_ts"] = now_ts
         save_state(st)
 
+        tv_symbol = os.environ.get("TV_SYMBOL", "BYBIT:BTCUSDT.P")
+        tv_link = f"https://www.tradingview.com/chart/?symbol={tv_symbol}&interval={interval}"
+        row["tv_symbol"] = tv_symbol
+        row["tv_link"] = tv_link
+
         msg = (
             f"BYBIT SIGNAL (trial, no trade)\n"
             f"{sym} {interval}m | Trend: {trend}\n"
@@ -264,6 +269,7 @@ def main() -> int:
             f"SL: {fmt(sl)} (risk≈${r_usd:.2f})\n"
             f"TP: {fmt(tp)} (R:R 1:{int(rr)})\n"
             f"Size: {size_btc:.4f} BTC\n"
+            f"TV: {tv_link}\n"
             f"Reason: {reason}"
         )
         telegram_send(msg)
