@@ -46,6 +46,8 @@ def main() -> int:
                 continue
 
             n += 1
+            if not r.get("filled", True):
+                continue
             wins += 1 if float(r.get("win") or 0) >= 1 else 0
             pnl += float(r.get("pnl_net") or 0)
             fees += float(r.get("fee") or 0)

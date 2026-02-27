@@ -185,6 +185,49 @@ def main() -> int:
             shares = float(r.get("shares") or 0)
             fee_rate_bps = float(mk.get("fee_rate_bps") or 0)
 
+            # --- Paper fill model (deterministic) ---
+            # Not all intents would fill at the logged price. Use a simple fill probability based on edge/conf.
+            edge = float(r.get("edge") or 0.0)
+            conf = float(r.get("conf") or 0.0)
+
+            # map to [0, 0.6]
+            p_edge = max(0.0, min(1.0, (edge - 0.02) / 0.06))
+            p_conf = max(0.0, min(1.0, (conf - 0.60) / 0.20))
+            p_fill = 0.05 + 0.55 * (0.6 * p_edge + 0.4 * p_conf)
+            p_fill = max(0.02, min(0.60, p_fill))
+
+            # deterministic coin flip based on key hash
+            h = abs(hash(key)) % 10_000
+            u = h / 10_000.0
+            filled = u < p_fill
+
+            if not filled:
+                out = {
+                    "resolved_ts": utc_now_iso(),
+                    "intent_ts": r.get("ts"),
+                    "market_id": market_id,
+                    "question": mk.get("question") or r.get("question"),
+                    "side": side,
+                    "entry_price": price,
+                    "shares": shares,
+                    "status": status,
+                    "outcome_up": outcome_up,
+                    "outcome_name": mk.get("outcome_name"),
+                    "fee_rate_bps": fee_rate_bps,
+                    "filled": False,
+                    "p_fill": p_fill,
+                    "u": u,
+                    "notional": 0.0,
+                    "fee": 0.0,
+                    "pnl_gross": 0.0,
+                    "pnl_net": 0.0,
+                    "win": 0.0,
+                }
+                append_result(out)
+                resolved[key] = {"resolved_ts": out["resolved_ts"], "pnl_net": out["pnl_net"], "win": out["win"], "filled": False}
+                new_resolved += 1
+                continue
+
             calc = paper_pnl(side=side, price=price, shares=shares, outcome_up=outcome_up, fee_rate_bps=fee_rate_bps)
 
             out = {
@@ -199,6 +242,9 @@ def main() -> int:
                 "outcome_up": outcome_up,
                 "outcome_name": mk.get("outcome_name"),
                 "fee_rate_bps": fee_rate_bps,
+                "filled": True,
+                "p_fill": p_fill,
+                "u": u,
                 **calc,
             }
 
