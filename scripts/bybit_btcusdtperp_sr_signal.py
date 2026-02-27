@@ -277,6 +277,13 @@ def main() -> int:
         except Exception:
             media = None
 
+        # Mark-to-market estimate (if the limit fills at entry)
+        if side == "LONG":
+            mtm = (last - entry) * size_btc
+        else:
+            mtm = (entry - last) * size_btc
+        row["mtm_if_filled_usd"] = mtm
+
         msg = (
             f"BYBIT SIGNAL (trial, no trade)\n"
             f"{sym} {interval}m | Trend: {trend}\n"
@@ -285,6 +292,7 @@ def main() -> int:
             f"SL: {fmt(sl)} (risk≈${r_usd:.2f})\n"
             f"TP: {fmt(tp)} (R:R 1:{int(rr)})\n"
             f"Size: {size_btc:.4f} BTC\n"
+            f"Now: {fmt(last)} | MTM (if filled): ${mtm:+.2f}\n"
             f"S/R: support={fmt(sup)} | resistance={fmt(res)}\n"
             f"TV: {tv_link}\n"
             f"Reason: {reason}"
