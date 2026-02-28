@@ -92,6 +92,46 @@ def ema(values: List[float], period: int) -> List[float]:
     return out
 
 
+def rsi(values: List[float], period: int = 14) -> List[float]:
+    if len(values) < period + 1:
+        return [50.0] * len(values)
+    gains = [0.0]
+    losses = [0.0]
+    for i in range(1, len(values)):
+        d = values[i] - values[i - 1]
+        gains.append(max(d, 0.0))
+        losses.append(max(-d, 0.0))
+    # Wilder smoothing
+    avg_g = sum(gains[1:period+1]) / period
+    avg_l = sum(losses[1:period+1]) / period
+    out = [50.0] * (period)
+    rs = avg_g / avg_l if avg_l > 0 else 999.0
+    out.append(100.0 - 100.0 / (1.0 + rs))
+    for i in range(period + 1, len(values)):
+        avg_g = (avg_g * (period - 1) + gains[i]) / period
+        avg_l = (avg_l * (period - 1) + losses[i]) / period
+        rs = avg_g / avg_l if avg_l > 0 else 999.0
+        out.append(100.0 - 100.0 / (1.0 + rs))
+    return out
+
+
+def atr(high: List[float], low: List[float], close: List[float], period: int = 14) -> List[float]:
+    if len(close) < period + 1:
+        return [0.0] * len(close)
+    tr = [0.0]
+    for i in range(1, len(close)):
+        tr_i = max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1]))
+        tr.append(tr_i)
+    # Wilder smoothing
+    a = sum(tr[1:period+1]) / period
+    out = [0.0] * period
+    out.append(a)
+    for i in range(period + 1, len(tr)):
+        a = (a * (period - 1) + tr[i]) / period
+        out.append(a)
+    return out
+
+
 def pivots(high: List[float], low: List[float], left: int, right: int) -> Tuple[List[int], List[int]]:
     ph, pl = [], []
     n = len(high)
@@ -195,32 +235,64 @@ def main() -> int:
     sup = supports[0] if supports else None
     res = resist[0] if resist else None
 
-    # Build a high-prob entry plan: fade to support in uptrend; fade to resistance in downtrend
+    # Indicators for retest entries
+    rsi14 = rsi(c, 14)[-1]
+    atr14 = atr(h, l, c, 14)[-1]
+
+    # Retest entry plan: wait for touch + rejection
     side = None
     entry = None
     sl = None
     tp = None
     reason = None
+    rr_used = rr
 
     # Risk calc: PnL per $ move ~= size_btc
     def risk_usd(entry_px, sl_px):
         return abs(entry_px - sl_px) * size_btc
 
+    # Define "touch" + "rejection" using last candle
+    o_last, h_last, l_last, c_last = o[-1], h[-1], l[-1], c[-1]
+    body = abs(c_last - o_last)
+    rng = max(1e-9, h_last - l_last)
+    upper_wick = h_last - max(o_last, c_last)
+    lower_wick = min(o_last, c_last) - l_last
+
+    def bullish_rejection() -> bool:
+        return (lower_wick / rng) > 0.45 and (c_last > o_last)
+
+    def bearish_rejection() -> bool:
+        return (upper_wick / rng) > 0.45 and (c_last < o_last)
+
+    atr_buf = max(tol * 0.5, atr14 * 0.25)
+
     if trend == "UP" and sup is not None:
-        # limit buy slightly above support
-        entry = sup + tol * 0.2
-        sl = sup - tol * 1.2
-        if risk_usd(entry, sl) <= max_risk:
+        touched = l_last <= sup <= h_last
+        if touched and bullish_rejection() and rsi14 >= 50:
             side = "LONG"
-            tp = entry + rr * (entry - sl)
-            reason = f"UP trend (EMA50>EMA200). Support={fmt(sup)}. Limit near support with tight invalidation."
+            entry = sup  # retest
+            sl = sup - atr_buf
+            # stronger if RSI higher and body decent
+            strength = (rsi14 - 50) / 20.0 + min(0.5, body / rng)
+            rr_used = 3.0 if strength >= 0.8 else 2.0
+            if risk_usd(entry, sl) <= max_risk:
+                tp = entry + rr_used * (entry - sl)
+                reason = f"Retest LONG: UP trend (EMA50>EMA200), touch support {fmt(sup)} + bullish rejection, RSI={rsi14:.1f}, ATR={atr14:.1f}."
+            else:
+                side = None
     elif trend == "DOWN" and res is not None:
-        entry = res - tol * 0.2
-        sl = res + tol * 1.2
-        if risk_usd(entry, sl) <= max_risk:
+        touched = l_last <= res <= h_last
+        if touched and bearish_rejection() and rsi14 <= 50:
             side = "SHORT"
-            tp = entry - rr * (sl - entry)
-            reason = f"DOWN trend (EMA50<EMA200). Resistance={fmt(res)}. Limit near resistance with tight invalidation."
+            entry = res
+            sl = res + atr_buf
+            strength = (50 - rsi14) / 20.0 + min(0.5, body / rng)
+            rr_used = 3.0 if strength >= 0.8 else 2.0
+            if risk_usd(entry, sl) <= max_risk:
+                tp = entry - rr_used * (sl - entry)
+                reason = f"Retest SHORT: DOWN trend (EMA50<EMA200), touch resistance {fmt(res)} + bearish rejection, RSI={rsi14:.1f}, ATR={atr14:.1f}."
+            else:
+                side = None
 
     row: Dict[str, Any] = {
         "ts": utc_now_iso(),
@@ -231,8 +303,11 @@ def main() -> int:
         "ema50": ema50,
         "ema200": ema200,
         "trend": trend,
+        "rsi14": rsi14,
+        "atr14": atr14,
         "support": sup,
         "resistance": res,
+        "candle_ts": t[-1],
     }
 
     if side and entry and sl and tp:
@@ -250,7 +325,7 @@ def main() -> int:
             "entry": entry,
             "sl": sl,
             "tp": tp,
-            "rr": rr,
+            "rr": rr_used,
             "size_btc": size_btc,
             "risk_usd": r_usd,
             "reason": reason,
@@ -312,7 +387,7 @@ def main() -> int:
             f"Side: {side}\n"
             f"Entry (limit): {fmt(entry)}\n"
             f"SL: {fmt(sl)} (risk≈${r_usd:.2f})\n"
-            f"TP: {fmt(tp)} (R:R 1:{int(rr)})\n"
+            f"TP: {fmt(tp)} (R:R 1:{int(rr_used)})\n"
             f"Size: {size_btc:.4f} BTC\n"
             f"Now: {fmt(last)} | MTM (if filled): ${mtm:+.2f}\n"
             f"S/R: support={fmt(sup)} | resistance={fmt(res)}\n"

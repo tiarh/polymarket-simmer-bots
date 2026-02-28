@@ -78,9 +78,13 @@ def append_out(row: Dict[str, Any]) -> None:
         w.writerow(row)
 
 
-def fetch_future_klines(symbol: str, interval: str, limit: int) -> List[List[str]]:
-    # Bybit returns most-recent first; we will sort by ts ascending.
+def fetch_klines(symbol: str, interval: str, limit: int, start_ms: Optional[int] = None, end_ms: Optional[int] = None) -> List[List[str]]:
+    # Bybit returns most-recent first; we sort asc.
     url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"
+    if start_ms is not None:
+        url += f"&start={int(start_ms)}"
+    if end_ms is not None:
+        url += f"&end={int(end_ms)}"
     data = http_json(url, timeout=15)
     lst = (((data.get("result") or {}).get("list")) or [])
     return sorted(lst, key=lambda r: int(r[0]))
@@ -106,21 +110,14 @@ def main() -> int:
                 continue
             signals.append(r)
 
-    # Resolve using latest klines (approx; not historical exact by timestamp)
-    # For trial, this is acceptable; later we can anchor by start timestamp.
     if not signals:
         return 0
 
     symbol = signals[-1].get("symbol", "BTCUSDT")
     interval = str(signals[-1].get("interval", "5"))
 
-    kl = fetch_future_klines(symbol, interval, limit=200)
-    # Convert to OHLC arrays
-    candles = []
-    for r in kl:
-        ts = int(r[0])
-        o = float(r[1]); h = float(r[2]); l = float(r[3]); c = float(r[4])
-        candles.append((ts, o, h, l, c))
+    # interval minutes -> ms
+    int_ms = int(float(interval) * 60_000)
 
     new = 0
     for s in signals[-200:]:
@@ -133,18 +130,32 @@ def main() -> int:
         sl = float(s.get("sl"))
         tp = float(s.get("tp"))
 
-        # Find fill + outcome in the last N candles window
+        # Fetch candles anchored around the signal candle timestamp
+        sig_ms = int(s.get("candle_ts") or 0)
+        # If missing candle_ts, fall back to end window.
+        if sig_ms <= 0:
+            sig_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - int_ms * lookahead
+
+        start_ms = sig_ms
+        end_ms = sig_ms + int_ms * (lookahead + 2)
+
+        kl = fetch_klines(symbol, interval, limit=min(200, lookahead + 50), start_ms=start_ms, end_ms=end_ms)
+        candles = []
+        for r in kl:
+            ts = int(r[0])
+            o_ = float(r[1]); h_ = float(r[2]); l_ = float(r[3]); c_ = float(r[4])
+            candles.append((ts, o_, h_, l_, c_))
+
         filled_idx: Optional[int] = None
         outcome = "unfilled"
 
-        for i in range(max(0, len(candles) - lookahead), len(candles)):
+        for i in range(len(candles)):
             _ts, _o, hi, lo, _c = candles[i]
             if lo <= entry <= hi:
                 filled_idx = i
                 break
 
         if filled_idx is not None:
-            # after fill candle, search subsequent candles
             for j in range(filled_idx, len(candles)):
                 _ts, _o, hi, lo, _c = candles[j]
                 if side == "LONG":
