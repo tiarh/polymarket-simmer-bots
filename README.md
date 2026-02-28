@@ -41,29 +41,56 @@ OpenClaw is configured to use an OpenAI model (e.g. **GPT (ChatGPT Plus / OpenAI
 - Bots are designed **paper-first**. Live trading is always behind explicit env flags.
 - Secrets are loaded via `EnvironmentFile=.../secrets/*.env` and **must never be committed**.
 
+## Architecture (high level)
+
+```text
+          (market data)                 (execution)
+Bybit public API ─┐                   ┌─ Simmer SDK ──> Polymarket
+                  ├─> signal bot ──>  │
+Polymarket data ──┘     |             └─ risk gates / sizing
+                         |
+                         ├─> journal (JSONL/CSV)
+                         ├─> resolver (paper outcomes)
+                         └─> Telegram report / alerts
+
+All orchestration/scheduling runs via systemd user timers on a VPS.
+```
+
 ## Quick start (paper)
 
-1) Create a Python venv (example):
+1) Create a Python venv:
 ```bash
 python3 -m venv weather-env
 source weather-env/bin/activate
-pip install -r requirements.txt  # (if/when you add one)
+pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
-2) Add secrets (DO NOT COMMIT):
+2) Copy env example and fill your targets/secrets locally (DO NOT COMMIT):
 ```bash
-mkdir -p secrets
-# Simmer
-nano secrets/simmer.env
+cp .env.example secrets/local.env
+# edit secrets/local.env
 ```
 
-3) Install systemd user units (templates live in `deploy/systemd/`):
+3) Install systemd user unit templates (in `deploy/systemd/`):
 ```bash
 mkdir -p ~/.config/systemd/user
 cp deploy/systemd/*.service deploy/systemd/*.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now <your-timer>.timer
 ```
+
+4) Run a one-shot signal test (Bybit, no keys needed):
+```bash
+BYBIT_TELEGRAM_TARGET=<your_chat_id> \
+/root/weather-env/bin/python scripts/bybit_btcusdtperp_sr_signal.py
+```
+
+## Screenshots
+
+Add your own screenshots here (examples):
+- Telegram signal message
+- TradingView chart snapshot
 
 ## Notes on publishing
 

@@ -1,0 +1,5 @@
+# Minimal deps for the public scripts (paper/signal tooling)
+# NOTE: live execution depends on simmer_sdk (not bundled here).
+
+playwright>=1.45
+pillow>=10.0
