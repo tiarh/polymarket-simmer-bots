@@ -264,8 +264,10 @@ def main() -> int:
         row["tv_symbol"] = tv_symbol
         row["tv_link"] = tv_link
 
-        # TradingView snapshot
+        # TradingView snapshot + RR overlay
         snap = os.path.join(WORKSPACE, "memory", "bybit_tv_last.png")
+        snap_rr = os.path.join(WORKSPACE, "memory", "bybit_tv_last_rr.png")
+        media = None
         try:
             subprocess.run([
                 "/root/weather-env/bin/python",
@@ -273,7 +275,27 @@ def main() -> int:
                 "--url", tv_link,
                 "--out", snap,
             ], timeout=60, check=False)
-            media = snap if os.path.exists(snap) else None
+
+            if os.path.exists(snap):
+                # Use recent candle range as plot range estimate
+                pmin = min(l[-60:])
+                pmax = max(h[-60:])
+                subprocess.run([
+                    "/root/weather-env/bin/python",
+                    os.path.join(WORKSPACE, "scripts", "rr_overlay.py"),
+                    "--in", snap,
+                    "--out", snap_rr,
+                    "--entry", str(entry),
+                    "--sl", str(sl),
+                    "--tp", str(tp),
+                    "--pmin", str(pmin),
+                    "--pmax", str(pmax),
+                    "--side", side,
+                ], timeout=30, check=False)
+                if os.path.exists(snap_rr):
+                    media = snap_rr
+                else:
+                    media = snap
         except Exception:
             media = None
 
