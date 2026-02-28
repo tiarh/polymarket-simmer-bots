@@ -1,2 +1,18 @@
 __pycache__/
 *.pyc
+
+# never commit secrets / state / journals
+secrets/
+memory/
+state/
+*.env
+*.log
+
+# local exports / router configs (often sensitive)
+restarea_*.rsc
+restarea_*.diff
+restarea_current.rsc
+ppp_secrets.csv
+
+# misc outputs
+out/
