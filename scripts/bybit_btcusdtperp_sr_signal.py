@@ -18,7 +18,7 @@ ENV:
   BYBIT_FIXED_SIZE_BTC=0.003
   BYBIT_RR=2 (or 3)
   BYBIT_SIGNAL_COOLDOWN_SECS=1800
-  BYBIT_TELEGRAM_TARGET=1089213658 (optional)
+  BYBIT_TELEGRAM_TARGET=<your chat id> (optional)
 """
 
 from __future__ import annotations

@@ -15,6 +15,7 @@ Environment=BYBIT_FIXED_SIZE_BTC=0.003
 Environment=BYBIT_MAX_RISK_USD=3.0
 Environment=BYBIT_RR=2
 Environment=BYBIT_SIGNAL_COOLDOWN_SECS=1800
-Environment=BYBIT_TELEGRAM_TARGET=1089213658
+# Set your Telegram chat id (or username) to receive signals
+Environment=BYBIT_TELEGRAM_TARGET=
 Environment=TV_SYMBOL=BYBIT:BTCUSDT.P
 ExecStart=/root/weather-env/bin/python /root/.openclaw/workspace/scripts/bybit_btcusdtperp_sr_signal.py
